@@ -24,6 +24,7 @@ import {
   STATE_DESTROYED,
   STATE_INITIALIZED,
   STATE_NEW,
+  TransitionDoneFn,
   TransitionInstruction,
   convertToViews,
 } from './nav-util';
@@ -62,6 +63,7 @@ export class NavControllerBase extends Ion implements NavController {
   _viewport: ViewContainerRef;
   _views: ViewController[] = [];
   _zIndexOffset: number = 0;
+  _destroyed: boolean;
 
   viewDidLoad: EventEmitter<any> = new EventEmitter();
   viewWillEnter: EventEmitter<any> = new EventEmitter();
@@ -102,9 +104,10 @@ export class NavControllerBase extends Ion implements NavController {
     this._sbEnabled = config.getBoolean('swipeBackEnabled');
     this._children = [];
     this.id = 'n' + (++ctrlIds);
+    this._destroyed = false;
   }
 
-  push(page: any, params?: any, opts?: NavOptions, done?: () => void): Promise<any> {
+  push(page: any, params?: any, opts?: NavOptions, done?: TransitionDoneFn): Promise<any> {
     return this._queueTrns({
       insertStart: -1,
       insertViews: [{ page: page, params: params }],
@@ -112,7 +115,7 @@ export class NavControllerBase extends Ion implements NavController {
     }, done);
   }
 
-  insert(insertIndex: number, page: any, params?: any, opts?: NavOptions, done?: () => void): Promise<any> {
+  insert(insertIndex: number, page: any, params?: any, opts?: NavOptions, done?: TransitionDoneFn): Promise<any> {
     return this._queueTrns({
       insertStart: insertIndex,
       insertViews: [{ page: page, params: params }],
@@ -120,7 +123,7 @@ export class NavControllerBase extends Ion implements NavController {
     }, done);
   }
 
-  insertPages(insertIndex: number, insertPages: any[], opts?: NavOptions, done?: () => void): Promise<any> {
+  insertPages(insertIndex: number, insertPages: any[], opts?: NavOptions, done?: TransitionDoneFn): Promise<any> {
     return this._queueTrns({
       insertStart: insertIndex,
       insertViews: insertPages,
@@ -128,7 +131,7 @@ export class NavControllerBase extends Ion implements NavController {
     }, done);
   }
 
-  pop(opts?: NavOptions, done?: () => void): Promise<any> {
+  pop(opts?: NavOptions, done?: TransitionDoneFn): Promise<any> {
     return this._queueTrns({
       removeStart: -1,
       removeCount: 1,
@@ -136,7 +139,7 @@ export class NavControllerBase extends Ion implements NavController {
     }, done);
   }
 
-  popTo(indexOrViewCtrl: any, opts?: NavOptions, done?: () => void): Promise<any> {
+  popTo(indexOrViewCtrl: any, opts?: NavOptions, done?: TransitionDoneFn): Promise<any> {
     let config: TransitionInstruction = {
       removeStart: -1,
       removeCount: -1,
@@ -151,7 +154,7 @@ export class NavControllerBase extends Ion implements NavController {
     return this._queueTrns(config, done);
   }
 
-  popToRoot(opts?: NavOptions, done?: () => void): Promise<any> {
+  popToRoot(opts?: NavOptions, done?: TransitionDoneFn): Promise<any> {
     return this._queueTrns({
       removeStart: 1,
       removeCount: -1,
@@ -167,7 +170,7 @@ export class NavControllerBase extends Ion implements NavController {
     return Promise.all(promises);
   }
 
-  remove(startIndex: number, removeCount: number = 1, opts?: NavOptions, done?: () => void): Promise<any> {
+  remove(startIndex: number, removeCount: number = 1, opts?: NavOptions, done?: TransitionDoneFn): Promise<any> {
     return this._queueTrns({
       removeStart: startIndex,
       removeCount: removeCount,
@@ -175,7 +178,7 @@ export class NavControllerBase extends Ion implements NavController {
     }, done);
   }
 
-  removeView(viewController: ViewController, opts?: NavOptions, done?: () => void): Promise<any> {
+  removeView(viewController: ViewController, opts?: NavOptions, done?: TransitionDoneFn): Promise<any> {
     return this._queueTrns({
       removeView: viewController,
       removeStart: 0,
@@ -184,12 +187,12 @@ export class NavControllerBase extends Ion implements NavController {
     }, done);
   }
 
-  setRoot(pageOrViewCtrl: any, params?: any, opts?: NavOptions, done?: () => void): Promise<any> {
+  setRoot(pageOrViewCtrl: any, params?: any, opts?: NavOptions, done?: TransitionDoneFn): Promise<any> {
     return this.setPages([{ page: pageOrViewCtrl, params: params }], opts, done);
   }
 
 
-  setPages(viewControllers: any[], opts?: NavOptions, done?: () => void): Promise<any> {
+  setPages(viewControllers: any[], opts?: NavOptions, done?: TransitionDoneFn): Promise<any> {
     if (isBlank(opts)) {
       opts = {};
     }
@@ -216,7 +219,7 @@ export class NavControllerBase extends Ion implements NavController {
   // 7. _transitionStart(): called once the transition actually starts, it initializes the Animation underneath.
   // 8. _transitionFinish(): called once the transition finishes
   // 9. _cleanup(): syncs the navigation internal state with the DOM. For example it removes the pages from the DOM or hides/show them.
-  _queueTrns(ti: TransitionInstruction, done: () => void): Promise<boolean> {
+  _queueTrns(ti: TransitionInstruction, done: TransitionDoneFn): Promise<boolean> {
     const promise = new Promise<boolean>((resolve, reject) => {
       ti.resolve = resolve;
       ti.reject = reject;
@@ -284,7 +287,7 @@ export class NavControllerBase extends Ion implements NavController {
     if (ti.done) {
       ti.done(false, false, rejectReason);
     }
-    if (ti.reject) {
+    if (ti.reject && !this._destroyed) {
       ti.reject(rejectReason);
     } else {
       ti.resolve(false);
@@ -594,7 +597,6 @@ export class NavControllerBase extends Ion implements NavController {
   }
 
   _transition(enteringView: ViewController, leavingView: ViewController, ti: TransitionInstruction): Promise<NavResult> {
-
     if (!ti.requiresTransition) {
       // transition is not required, so we are already done!
       // they're inserting/removing the views somewhere in the middle or
@@ -856,35 +858,38 @@ export class NavControllerBase extends Ion implements NavController {
   _cleanup(activeView: ViewController) {
     // ok, cleanup time!! Destroy all of the views that are
     // INACTIVE and come after the active view
-    const activeViewIndex = this._views.indexOf(activeView);
-    const views = this._views;
-    let reorderZIndexes = false;
-    let view: ViewController;
-    let i: number;
+    // only do this if the views exist, though
+    if (!this._destroyed) {
+      const activeViewIndex = this._views.indexOf(activeView);
+      const views = this._views;
+      let reorderZIndexes = false;
+      let view: ViewController;
+      let i: number;
 
-    for (i = views.length - 1; i >= 0; i--) {
-      view = views[i];
-      if (i > activeViewIndex) {
-        // this view comes after the active view
-        // let's unload it
-        this._willUnload(view);
-        this._destroyView(view);
-
-      } else if (i < activeViewIndex && !this._isPortal) {
-        // this view comes before the active view
-        // and it is not a portal then ensure it is hidden
-        view._domShow(false, this._renderer);
-      }
-      if (view._zIndex <= 0) {
-        reorderZIndexes = true;
-      }
-    }
-
-    if (!this._isPortal && reorderZIndexes) {
-      for (i = 0; i < views.length; i++) {
+      for (i = views.length - 1; i >= 0; i--) {
         view = views[i];
-        // ******** DOM WRITE ****************
-        view._setZIndex(view._zIndex + INIT_ZINDEX + 1, this._renderer);
+        if (i > activeViewIndex) {
+          // this view comes after the active view
+          // let's unload it
+          this._willUnload(view);
+          this._destroyView(view);
+
+        } else if (i < activeViewIndex && !this._isPortal) {
+          // this view comes before the active view
+          // and it is not a portal then ensure it is hidden
+          view._domShow(false, this._renderer);
+        }
+        if (view._zIndex <= 0) {
+          reorderZIndexes = true;
+        }
+      }
+
+      if (!this._isPortal && reorderZIndexes) {
+        for (i = 0; i < views.length; i++) {
+          view = views[i];
+          // ******** DOM WRITE ****************
+          view._setZIndex(view._zIndex + INIT_ZINDEX + 1, this._renderer);
+        }
       }
     }
   }
@@ -991,6 +996,10 @@ export class NavControllerBase extends Ion implements NavController {
     return this._children;
   }
 
+  getAllChildNavs(): any[] {
+    return this._children;
+  }
+
   registerChildNav(container: NavigationContainer) {
     this._children.push(container);
   }
@@ -1017,6 +1026,8 @@ export class NavControllerBase extends Ion implements NavController {
     if (this.parent && this.parent.unregisterChildNav) {
       this.parent.unregisterChildNav(this);
     }
+
+    this._destroyed = true;
   }
 
   swipeBackStart() {
@@ -1174,7 +1185,7 @@ export class NavControllerBase extends Ion implements NavController {
     content && content.resize();
   }
 
-  goToRoot(_opts: NavOptions) {
+  goToRoot(_opts: NavOptions): Promise<any> {
     return Promise.reject(new Error('goToRoot needs to be implemented by child class'));
   }
 

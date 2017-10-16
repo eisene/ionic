@@ -1,4 +1,4 @@
-import { AfterViewInit, ChangeDetectionStrategy, Component, ElementRef, EventEmitter, Input, NgZone, OnDestroy, Optional, Output, Renderer, ViewChild, ViewEncapsulation } from '@angular/core';
+import { AfterViewInit, ChangeDetectionStrategy, Component, ElementRef, EventEmitter, HostListener, Input, NgZone, OnDestroy, Optional, Output, Renderer, ViewChild, ViewEncapsulation } from '@angular/core';
 
 import { App } from '../app/app';
 import { Config } from '../../config/config';
@@ -31,7 +31,7 @@ export class EventEmitterProxy<T> extends EventEmitter<T> {
  * The Content component provides an easy to use content area with
  * some useful methods to control the scrollable area. There should
  * only be one content in a single view component. If additional scrollable
- * elements are need, use [ionScroll](../../scroll/Scroll).
+ * elements are needed, use [ionScroll](../../scroll/Scroll).
  *
  *
  * The content area can also implement pull-to-refresh with the
@@ -63,7 +63,7 @@ export class EventEmitterProxy<T> extends EventEmitter<T> {
  *
  * @advanced
  *
- * ### Sroll Events
+ * ### Scroll Events
  *
  * Scroll events happen outside of Angular's Zones. This is for performance reasons. So
  * if you're trying to bind a value to any scroll event, it will need to be wrapped in
@@ -670,6 +670,7 @@ export class Content extends Ion implements OnDestroy, AfterViewInit, IContent {
    * Tell the content to recalculate its dimensions. This should be called
    * after dynamically adding/removing headers, footers, or tabs.
    */
+  @HostListener('window:resize')
   resize() {
     this._dom.read(this._readDimensions.bind(this));
     this._dom.write(this._writeDimensions.bind(this));

@@ -2,7 +2,7 @@ import { ComponentFactory, ComponentFactoryResolver } from '@angular/core';
 import { Location } from '@angular/common';
 
 import { App } from '../components/app/app';
-import { DIRECTION_BACK, NavLink, NavSegment, convertToViews, isNav, isTab, isTabs,  } from './nav-util';
+import { DIRECTION_BACK, NavLink, NavSegment, TransitionDoneFn, convertToViews, isNav, isTab, isTabs } from './nav-util';
 import { ModuleLoader } from '../util/module-loader';
 import { isArray, isPresent } from '../util/util';
 import { Tab, Tabs } from './nav-interfaces';
@@ -131,18 +131,23 @@ export class DeepLinker {
    */
   navChange(direction: string) {
     if (direction) {
-      const rootNavContainers = this._app.getActiveNavContainers();
+      const activeNavContainers = this._app.getActiveNavContainers();
       // the only time you'll ever get a TABS here is when loading directly from a URL
       // this method will be called again when the TAB is loaded
       // so just don't worry about the TABS for now
       // if you encounter a TABS, just return
-      let segments: NavSegment[] = [];
-      for (const rootNavContainer of rootNavContainers) {
-        if (isTabs(rootNavContainer) || (rootNavContainer as NavController).isTransitioning()) {
+      for (const activeNavContainer of activeNavContainers) {
+        if (isTabs(activeNavContainer) || (activeNavContainer as NavController).isTransitioning()) {
           return;
         }
-        const segmentsForNav = this.getSegmentsFromNav(rootNavContainer);
-        segments = segments.concat(segmentsForNav);
+      }
+
+      // okay, get the root navs and build the segments up
+      let segments: NavSegment[] = [];
+      const navContainers: NavigationContainer[] = this._app.getRootNavs();
+      for (const navContainer of navContainers) {
+        const segmentsForNav = this.getSegmentsFromNav(navContainer);
+         segments = segments.concat(segmentsForNav);
       }
       segments = segments.filter(segment => !!segment);
       if (segments.length) {
@@ -153,19 +158,16 @@ export class DeepLinker {
   }
 
   getSegmentsFromNav(nav: NavigationContainer): NavSegment[] {
-    const segments: NavSegment[] = [];
-    while (nav) {
-      if (isNav(nav)) {
-        segments.push(this.getSegmentFromNav(nav as NavController));
-        nav = nav.parent;
-      } else if (isTab(nav)) {
-        segments.push(this.getSegmentFromTab(nav));
-        nav = nav.parent && nav.parent.parent;
-      } else {
-        nav = nav.parent;
-      }
+    let segments: NavSegment[] = [];
+    if (isNav(nav)) {
+      segments.push(this.getSegmentFromNav(nav as NavController));
+    } else if (isTab(nav)) {
+      segments.push(this.getSegmentFromTab(nav));
     }
-    return segments.reverse();
+    nav.getActiveChildNavs().forEach(child => {
+      segments = segments.concat(this.getSegmentsFromNav(child));
+    });
+    return segments;
   }
 
   getSegmentFromNav(nav: NavController, component?: any, data?: any): NavSegment {
@@ -176,7 +178,7 @@ export class DeepLinker {
         data = viewController.data;
       }
     }
-    return this._serializer.serializeComponent({ navId: nav.name && nav.name.length ? nav.name : nav.id, secondaryId: null, type: 'nav'}, component, data);
+    return this._serializer.serializeComponent(nav, component, data);
   }
 
   getSegmentFromTab(navContainer: NavigationContainer, component?: any, data?: any): NavSegment {
@@ -190,7 +192,7 @@ export class DeepLinker {
           component = viewController.component;
           data = viewController.data;
         }
-        return this._serializer.serializeComponent({ navId: tabsNavContainer.name || tabsNavContainer.id, secondaryId: tabsNavContainer.getSecondaryIdentifier(), type: 'tabs'}, component, data);
+        return this._serializer.serializeComponent(tabsNavContainer, component, data);
       }
     }
   }
@@ -378,9 +380,9 @@ export class DeepLinker {
    *
    * @internal
    */
-  _loadViewForSegment(navContainer: NavigationContainer, segment: NavSegment, done: Function) {
+  _loadViewForSegment(navContainer: NavigationContainer, segment: NavSegment, done: TransitionDoneFn) {
     if (!segment) {
-      return done();
+      return done(false, false);
     }
 
     if (isTabs(navContainer) || (isTab(navContainer) && navContainer.parent)) {
@@ -393,7 +395,7 @@ export class DeepLinker {
         updateUrl: false,
         animate: false
       }, true);
-      return done();
+      return done(false, false);
     }
 
     const navController = <NavController> <any> navContainer;
@@ -408,7 +410,7 @@ export class DeepLinker {
         if (i === numViews) {
           // this is the last view in the stack and it's the same
           // as the segment so there's no change needed
-          return done();
+          return done(false, false);
         } else {
           // it's not the exact view as the end
           // let's have this nav go back to this exact view

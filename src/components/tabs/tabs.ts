@@ -510,6 +510,13 @@ export class Tabs extends Ion implements AfterViewInit, RootNode, ITabs, Navigat
   /**
    * @internal
    */
+  getAllChildNavs(): any[] {
+    return this._tabs;
+  }
+
+  /**
+   * @internal
+   */
   getIndex(tab: Tab): number {
     return this._tabs.indexOf(tab);
   }
@@ -635,7 +642,7 @@ export class Tabs extends Ion implements AfterViewInit, RootNode, ITabs, Navigat
   /**
    * @private
    */
-  _getSelectedTabIndex(secondaryId: string, fallbackIndex: number = 0): number {
+  _getSelectedTabIndex(secondaryId: string = '', fallbackIndex: number = 0): number {
     // we found a segment which probably represents which tab to select
     const indexMatch = secondaryId.match(/tab-(\d+)/);
     if (indexMatch) {
